@@ -7,9 +7,9 @@ API
 ===
 
     function connect(srv::String = "localhost", prt::Int = 9042)
-
     function disconnect(con::CQLConnection)
 
+To open and close a connection to the Cassandra server.
 
     function query(con::CQLConnection, msg::String)
 

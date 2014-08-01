@@ -330,10 +330,12 @@ function getResult(reply)
 end
 
 function sync(con)
+  while 0 < con.pending
     yield();
   end
 end
 
 ##################################################################
+
 end
 

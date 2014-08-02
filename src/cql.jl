@@ -18,6 +18,8 @@ type CQLConnection
 end
 
 ##################################################################
+# Connect & Disconnect
+##################################################################
 
 function connect(srv::String = "localhost", prt::Int = 9042)
   con = CQLConnection(srv, prt);
@@ -44,6 +46,8 @@ function disconnect(con::CQLConnection)
   con 
 end
 
+##################################################################
+# Handle Server Messages
 ##################################################################
 
 function readServerMessage(socket::Base.TcpSocket)
@@ -84,7 +88,9 @@ function handleServerMessages(con::CQLConnection)
   nothing
 end
 
+##################################################################
 ### Decoding #####################################################
+##################################################################
 
 function decodeString(s)
   strlen = int(ntoh(read(s, Uint16)));
@@ -230,7 +236,9 @@ function decodeMessage(opcode::Uint8, buffer::Array{Uint8})
   end
 end
 
+##################################################################
 ### Encoding #####################################################
+##################################################################
 
 function cql_encode_string(buf :: IOBuffer, str :: String)
   encStr = bytestring(is_valid_utf8(str) ? str : utf8(str));
@@ -246,6 +254,8 @@ function cql_encode_long_string(buf :: IOBuffer, str :: String)
   nothing
 end
 
+##################################################################
+# Encoding
 ##################################################################
 
 function cql_encode(buf :: IOBuffer, dict :: Dict)
@@ -265,6 +275,8 @@ function cql_encode(buf :: IOBuffer, query :: String)
   nothing
 end
 
+##################################################################
+# Sending Message to the server
 ##################################################################
 
 function sendMessageBody(con  :: CQLConnection, msg)
@@ -301,7 +313,9 @@ function nextReplyID(con :: CQLConnection)
 end
 
 ##################################################################
-
+# Queries
+##################################################################
+ 
 function query(con::CQLConnection, msg::String)
   sync(con);
   getResult(asyncQuery(con, msg))

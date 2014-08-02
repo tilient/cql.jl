@@ -5,25 +5,20 @@ module cql
 ##################################################################
 
 type CQLConnection
-  server  :: String
-  port    :: Int
   socket  :: Base.TcpSocket
   buffer  :: IOBuffer
   msg_id  :: Uint8
   replies :: Dict
   pending :: Int
-
-  CQLConnection(srv::String, prt::Int) =
-    new(srv, prt, Base.TcpSocket(), IOBuffer(), 1, Dict(), 0);
 end
 
 ##################################################################
 # Connect & Disconnect
 ##################################################################
 
-function connect(srv::String = "localhost", prt::Int = 9042)
-  con = CQLConnection(srv, prt);
-  con.socket = Base.connect(con.server, con.port);
+function connect(server::String = "localhost", port::Int = 9042)
+  con = CQLConnection(Base.connect(server, port),
+                      IOBuffer(), 1, Dict(), 0);
   sendMessage(con, 0x01, {"CQL_VERSION" => "3.0.0"});
   version, id, opcode, len = readServerMessage(con.socket);
   con.pending = 0;
@@ -38,9 +33,9 @@ function disconnect(con::CQLConnection)
     yield();
   end
   close(con.socket);
-  con.socket = Base.TcpSocket();
-  con.buffer = IOBuffer();
-  con.msg_id = 1;
+  con.socket  = Base.TcpSocket();
+  con.buffer  = IOBuffer();
+  con.msg_id  = 1;
   con.replies = Dict();
   con.pending = 0;
   con 
@@ -53,9 +48,9 @@ end
 function readServerMessage(socket::Base.TcpSocket)
   version = read(socket, Uint8);
   flags   = read(socket, Uint8);
-  id      = int(read(socket, Uint8));
+  id      = read(socket, Uint8);
   opcode  = read(socket, Uint8);
-  len     = int(ntoh(read(socket, Uint32)));
+  len     = ntoh(read(socket, Uint32));
   (version, id, opcode, len)
 end
   
@@ -64,13 +59,11 @@ function handleServerMessage(con::CQLConnection)
   if id > 0 then
     put!(pop!(con.replies, id), 
          (opcode, readbytes(con.socket, len)));
+  elseif opcode == 0x00 then
+    println("ERROR: ", bytestring(readbytes(con.socket, len)));
   else
-    if opcode == 0x00 then
-      println("ERROR: ", bytestring(readbytes(con.socket, len)));
-    else
-      for i in 1:len
-        read(con.socket, Uint8);
-      end
+    for i in 1:len
+      read(con.socket, Uint8);
     end
   end
   con.pending -= 1;
@@ -92,69 +85,53 @@ end
 ### Decoding #####################################################
 ##################################################################
 
-function decodeString(s)
-  strlen = int(ntoh(read(s, Uint16)));
+function decodeString(s::Base.TcpSocket)
+  strlen = ntoh(read(s, Int16));
   bytestring(readbytes(s, strlen));
 end
 
-function decodeValue(s, nrOfBytes, type_kind, val_type, key_type)
-  value = nothing;
-  if nrOfBytes < 0 then
-    ## null
-  elseif type_kind == 0x02 then
-    ## Bigint
-    value = int(ntoh(read(s, Uint64))); 
-  elseif type_kind == 0x09 then
-    ## Int
-    value = int(ntoh(read(s, Uint32))); 
-  elseif type_kind == 0x0B then
-    ## Timestamp
-    value = ("Timestamp", ntoh(read(s, Uint64)));  
-  elseif type_kind == 0x0C then
-    ## UUID 
-    value = ("UUID", ntoh(read(s, Uint128)));  
-  elseif type_kind == 0x0D then
-    ## String
-    value = bytestring(readbytes(s, nrOfBytes));
-  elseif type_kind == 0x20 then
-    ## List
-    nrOfElements = int(ntoh(read(s, Uint16))); 
-    value = Array(Any,nrOfElements);
-    for i in 1:nrOfElements
-      nrOfBytes = ntoh(read(s, Int16)); 
-      val = decodeValue(s, nrOfBytes, val_type, nothing, nothing);
-      value[i] = val;
-    end
-  elseif type_kind == 0x21 then
-    ## Map
+function decodeValue(s::Base.TcpSocket, nrOfBytes::Int, 
+                     type_kind::Uint8, val_type::Uint8 = nothing, 
+                     key_type::Uint8 = nothing)
+  if nrOfBytes < 0 then              ## null
+    return nothing
+  elseif type_kind == 0x02 then      ## Bigint
+    return ntoh(read(s, Uint64)); 
+  elseif type_kind == 0x09 then      ## Int
+    return int(ntoh(read(s, Uint32))); 
+  elseif type_kind == 0x0B then      ## Timestamp
+    return ("Timestamp", ntoh(read(s, Uint64)));  
+  elseif type_kind == 0x0C then      ## UUID 
+    return ("UUID", ntoh(read(s, Uint128)));  
+  elseif type_kind == 0x0D then      ## String
+    return bytestring(readbytes(s, nrOfBytes));
+  elseif type_kind == 0x20 then      ## List
+    nrOfElements = ntoh(read(s, Uint16)); 
+    return [decodeValue(s, ntoh(read(s, Int16)), val_type)
+            for i in 1:nrOfElements]
+  elseif type_kind == 0x21 then      ## Map
     nrOfElements = int(ntoh(read(s, Uint16))); 
     value = Dict();
     for i in 1:nrOfElements
       nrOfBytes = ntoh(read(s, Int16)); 
-      key = decodeValue(s, nrOfBytes, key_type, nothing, nothing);
+      key = decodeValue(s, nrOfBytes, key_type);
       nrOfBytes = ntoh(read(s, Int16)); 
-      val = decodeValue(s, nrOfBytes, val_type, nothing, nothing);
+      val = decodeValue(s, nrOfBytes, val_type);
       value[key] = val;
     end
-  elseif type_kind == 0x22 then
-    ## Set
-    nrOfElements = int(ntoh(read(s, Uint16))); 
-    value = Set();
-    for i in 1:nrOfElements
-      nrOfBytes = ntoh(read(s, Int16)); 
-      val = decodeValue(s, nrOfBytes, val_type, nothing, nothing);
-      push!(value, val);
-    end
+    return value
+  elseif type_kind == 0x22 then      ## Set
+    nrOfElements = ntoh(read(s, Uint16)); 
+    return Set([decodeValue(s, ntoh(read(s, Int16)), val_type)
+                for i in 1:nrOfElements])
   else
-    bytes = readbytes(s, nrOfBytes);
-    value = ("*NYI*", type_kind, bytes);
+    return ("*NYI*", type_kind, readbytes(s, nrOfBytes));
   end
-  value
 end
 
 function decodeResultRows(s::IOBuffer)
   flags = ntoh(read(s, Uint32)); 
-  colcnt = int(ntoh(read(s, Uint32))); 
+  colcnt = ntoh(read(s, Uint32)); 
   global_tables_spec = (flags & 0x0001) != 0;
   
   if global_tables_spec then
@@ -193,16 +170,14 @@ function decodeResultRows(s::IOBuffer)
     #println(col, " :: $ksname.$tablename.$name : $type_kind")
   end
 
-  rows_count = int(ntoh(read(s, Uint32))); 
-  values = Array(Any,(rows_count));
-  for row in 1:rows_count
-    row_value = Array(Any,(colcnt));
-    values[row] = row_value;
+  row_count = ntoh(read(s, Uint32)); 
+  values = Vector(Vector{Any}, row_count);
+  for row in 1:row_count
+    values[row] = row_value = Vector(Any, colcnt);
     for col in 1:colcnt
       nrOfBytes = ntoh(read(s, Int32)); 
-      value = decodeValue(s, nrOfBytes, col_type[col], 
+      row_value[col] = decodeValue(s, nrOfBytes, col_type[col], 
                           col_sub_type[col], col_key_type[col]);
-      row_value[col] = value;
     end
   end
   values
@@ -210,44 +185,36 @@ end
 
 function decodeResultMessage(buffer::Array{Uint8})
   s = IOBuffer(buffer);
-  kind = int(ntoh(read(s, Uint32))); 
-  if kind == 1
-    return({"void"});
-  elseif kind == 2
-    return decodeResultRows(s);
-  elseif kind == 3
-    return({"set keyspace", decodeString(s)});
-  elseif kind == 4
-    return({"prepared"});
-  elseif kind == 5
-    return({"schema change", decodeString(s), 
-             decodeString(s), decodeString(s)});
-  end
-  return {"???"}
+  kind = ntoh(read(s, Uint32)); 
+  kind == 0x01 ? {"void"} :
+  kind == 0x02 ? decodeResultRows(s) :
+  kind == 0x03 ? {"set keyspace", decodeString(s)} :
+  kind == 0x04 ? {"prepared"} :
+  kind == 0x05 ? {"schema change", decodeString(s), 
+                  decodeString(s), decodeString(s)} :
+          {"???"}
 end
 
 function decodeMessage(opcode::Uint8, buffer::Array{Uint8})
-  if opcode == 0x08 then
-    decodeResultMessage(buffer);
-  elseif opcode == 0x00 then
-    println("ERROR: ", bytestring(buffer));
-  else
-    opcode
-  end
+  opcode == 0x08 ? decodeResultMessage(buffer) :
+  opcode == 0x00 ? ( errmsg = bytestring(buffer);
+                     println("ERROR: ", errmsg);
+                     {"ERROR", errmsg} ) :
+            {opcode, buffer};
 end
 
 ##################################################################
 ### Encoding #####################################################
 ##################################################################
 
-function cql_encode_string(buf :: IOBuffer, str :: String)
+function cql_encode_string(buf::IOBuffer, str::String)
   encStr = bytestring(is_valid_utf8(str) ? str : utf8(str));
   write(buf, hton(uint16(sizeof(encStr))));
   write(buf, encStr);
   nothing
 end
 
-function cql_encode_long_string(buf :: IOBuffer, str :: String)
+function cql_encode_long_string(buf::IOBuffer, str::String)
   encStr = bytestring(is_valid_utf8(str) ? str : utf8(str));
   write(buf, hton(uint32(sizeof(encStr))));
   write(buf, encStr);
@@ -258,7 +225,7 @@ end
 # Encoding
 ##################################################################
 
-function cql_encode(buf :: IOBuffer, dict :: Dict)
+function cql_encode(buf::IOBuffer, dict::Dict)
   write(buf, hton(uint16(length(dict))));
   for (k,v) in dict
     cql_encode_string(buf, k);
@@ -267,7 +234,7 @@ function cql_encode(buf :: IOBuffer, dict :: Dict)
   nothing
 end
 
-function cql_encode(buf :: IOBuffer, query :: String)
+function cql_encode(buf::IOBuffer, query::String)
   cql_encode_long_string(buf, query);
   write(buf, 0x00); 
   write(buf, 0x04); 
@@ -279,7 +246,7 @@ end
 # Sending Message to the server
 ##################################################################
 
-function sendMessageBody(con  :: CQLConnection, msg)
+function sendMessageBody(con::CQLConnection, msg)
   buf = con.buffer;
   truncate(buf, 0);
   cql_encode(buf, msg);
@@ -301,7 +268,7 @@ function sendMessage(con::CQLConnection, kind::Uint8,
   nothing
 end
 
-function nextReplyID(con :: CQLConnection)
+function nextReplyID(con::CQLConnection)
   id :: Uint8 = con.msg_id;
   con.msg_id = 1 + (id + 1) % 99;
   while haskey(con.replies, id)
@@ -339,11 +306,11 @@ function asyncCommand(con::CQLConnection, msg::String)
   nothing
 end
 
-function getResult(reply)
+function getResult(reply::RemoteRef)
   decodeMessage(take!(reply) ...)
 end
 
-function sync(con)
+function sync(con::CQLConnection)
   while 0 < con.pending
     yield();
   end

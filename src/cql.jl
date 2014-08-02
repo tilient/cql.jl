@@ -85,48 +85,48 @@ end
 ### Decoding #####################################################
 ##################################################################
 
-function decodeString(s::Base.TcpSocket)
+function decodeString(s::IO)
   strlen = ntoh(read(s, Int16));
   bytestring(readbytes(s, strlen));
 end
 
-function decodeValue(s::Base.TcpSocket, nrOfBytes::Int, 
-                     type_kind::Uint8, val_type::Uint8 = nothing, 
-                     key_type::Uint8 = nothing)
-  if nrOfBytes < 0 then              ## null
-    return nothing
-  elseif type_kind == 0x02 then      ## Bigint
-    return ntoh(read(s, Uint64)); 
-  elseif type_kind == 0x09 then      ## Int
-    return int(ntoh(read(s, Uint32))); 
-  elseif type_kind == 0x0B then      ## Timestamp
-    return ("Timestamp", ntoh(read(s, Uint64)));  
-  elseif type_kind == 0x0C then      ## UUID 
-    return ("UUID", ntoh(read(s, Uint128)));  
-  elseif type_kind == 0x0D then      ## String
-    return bytestring(readbytes(s, nrOfBytes));
-  elseif type_kind == 0x20 then      ## List
-    nrOfElements = ntoh(read(s, Uint16)); 
-    return [decodeValue(s, ntoh(read(s, Int16)), val_type)
-            for i in 1:nrOfElements]
-  elseif type_kind == 0x21 then      ## Map
-    nrOfElements = int(ntoh(read(s, Uint16))); 
-    value = Dict();
-    for i in 1:nrOfElements
-      nrOfBytes = ntoh(read(s, Int16)); 
-      key = decodeValue(s, nrOfBytes, key_type);
-      nrOfBytes = ntoh(read(s, Int16)); 
-      val = decodeValue(s, nrOfBytes, val_type);
-      value[key] = val;
-    end
-    return value
-  elseif type_kind == 0x22 then      ## Set
-    nrOfElements = ntoh(read(s, Uint16)); 
-    return Set([decodeValue(s, ntoh(read(s, Int16)), val_type)
-                for i in 1:nrOfElements])
-  else
-    return ("*NYI*", type_kind, readbytes(s, nrOfBytes));
+function decodeList(s::IO, val_type)
+  nrOfElements = int(ntoh(read(s, Uint16))); 
+  ar = Array(Any, nrOfElements);
+  for i in 1:nrOfElements
+    nrOfBytes = ntoh(read(s, Int16)); 
+    ar[i] = decodeValue(s, nrOfBytes, val_type);
   end
+  ar
+end
+
+function decodeDict(s::IO, key_type, val_type)
+  d = Dict();
+  nrOfElements = int(ntoh(read(s, Uint16))); 
+  for i in 1:nrOfElements
+    nrOfBytes = ntoh(read(s, Int16)); 
+    key = decodeValue(s, nrOfBytes, key_type);
+    nrOfBytes = ntoh(read(s, Int16)); 
+    val = decodeValue(s, nrOfBytes, val_type);
+    d[key] = val;
+  end
+  d
+end
+
+function decodeValue(s::IO, nrOfBytes::Integer, 
+                     type_kind::Uint16, 
+                     val_type = nothing, 
+                     key_type = nothing)
+  nrOfBytes < 0     ? nothing :
+  type_kind == 0x02 ? ntoh(read(s, Uint64)) : 
+  type_kind == 0x09 ? int(ntoh(read(s, Uint32))) :
+  type_kind == 0x0B ? ("Timestamp", ntoh(read(s, Uint64))) :
+  type_kind == 0x0C ? ("UUID", ntoh(read(s, Uint128))) :
+  type_kind == 0x0D ? bytestring(readbytes(s, nrOfBytes)) :
+  type_kind == 0x20 ? decodeList(s, val_type) :
+  type_kind == 0x21 ? decodeDict(s, key_type, val_type) :
+  type_kind == 0x22 ? Set(decodeList(s, val_type)) :
+            ("*NYI*", type_kind, readbytes(s, nrOfBytes))
 end
 
 function decodeResultRows(s::IOBuffer)
@@ -171,9 +171,9 @@ function decodeResultRows(s::IOBuffer)
   end
 
   row_count = ntoh(read(s, Uint32)); 
-  values = Vector(Vector{Any}, row_count);
+  values = Array(Any, row_count);
   for row in 1:row_count
-    values[row] = row_value = Vector(Any, colcnt);
+    values[row] = row_value = Array(Any, colcnt);
     for col in 1:colcnt
       nrOfBytes = ntoh(read(s, Int32)); 
       row_value[col] = decodeValue(s, nrOfBytes, col_type[col], 
@@ -192,7 +192,7 @@ function decodeResultMessage(buffer::Array{Uint8})
   kind == 0x04 ? {"prepared"} :
   kind == 0x05 ? {"schema change", decodeString(s), 
                   decodeString(s), decodeString(s)} :
-          {"???"}
+       {"???"}
 end
 
 function decodeMessage(opcode::Uint8, buffer::Array{Uint8})
@@ -200,7 +200,7 @@ function decodeMessage(opcode::Uint8, buffer::Array{Uint8})
   opcode == 0x00 ? ( errmsg = bytestring(buffer);
                      println("ERROR: ", errmsg);
                      {"ERROR", errmsg} ) :
-            {opcode, buffer};
+         {opcode, buffer};
 end
 
 ##################################################################

@@ -123,9 +123,9 @@ function test01()
   println(cql.query(c, "SELECT id, venue FROM songs;"));
 
   cql.command(c, 
-    "CREATE INDEX album_name ON playlists ( album );");
+    "CREATE INDEX album_name ON playlists (album);");
   cql.command(c, 
-    "CREATE INDEX title_name ON playlists ( title );");
+    "CREATE INDEX title_name ON playlists (title);");
 
   println(cql.query(c,
     "SELECT * FROM playlists
@@ -199,7 +199,8 @@ function test03()
   @time begin
     for i in 1:N
       cql.asyncCommand(c, 
-        "INSERT INTO person (id, od, name) VALUES (1, $i, 'hihaho');");
+        "INSERT INTO person (id, od, name) 
+         VALUES (1, $i, 'hihaho');");
     end
     cql.sync(c);
   end

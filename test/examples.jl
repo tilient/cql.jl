@@ -194,7 +194,7 @@ function test03()
     "create table person (id int , od int, name varchar, 
                           PRIMARY KEY (id, od));");
 
-  N = 100000;
+  N = 10;
   
   @time begin
     for i in 1:N

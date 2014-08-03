@@ -62,7 +62,7 @@ function handleServerMessage(con::CQLConnection)
   elseif opcode == 0x00 then
     println("ERROR: ", bytestring(readbytes(con.socket, len)));
   else
-    for i in 1:len
+    for _ in 1:len
       read(con.socket, Uint8);
     end
   end
@@ -90,33 +90,37 @@ function decodeString(s::IO)
   bytestring(readbytes(s, strlen));
 end
 
-function decodeList(s::IO, val_type)
-  nrOfElements = int(ntoh(read(s, Uint16))); 
+function decodeResultSubColumn(s::IO, typ) 
+  nrOfBytes = ntoh(read(s, Int16));
+  decodeValue(s, nrOfBytes, (typ, nothing, nothing))
+end
+
+function decodeList(s::IO, typ)
+  nrOfElements = ntoh(read(s, Uint16)); 
   ar = Array(Any, nrOfElements);
-  for i in 1:nrOfElements
-    nrOfBytes = ntoh(read(s, Int16)); 
-    ar[i] = decodeValue(s, nrOfBytes, val_type);
+  for ix in 1:nrOfElements
+    ar[ix] = decodeResultSubColumn(s, typ);
   end
   ar
+end
+
+function decodeMap(s::IO, val_type)
+  Set(decodeList(s, val_type))
 end
 
 function decodeDict(s::IO, key_type, val_type)
   d = Dict();
   nrOfElements = int(ntoh(read(s, Uint16))); 
   for i in 1:nrOfElements
-    nrOfBytes = ntoh(read(s, Int16)); 
-    key = decodeValue(s, nrOfBytes, key_type);
-    nrOfBytes = ntoh(read(s, Int16)); 
-    val = decodeValue(s, nrOfBytes, val_type);
+    key = decodeResultSubColumn(s, key_type);
+    val = decodeResultSubColumn(s, val_type);
     d[key] = val;
   end
   d
 end
 
-function decodeValue(s::IO, nrOfBytes::Integer, 
-                     type_kind::Uint16, 
-                     val_type = nothing, 
-                     key_type = nothing)
+function decodeValue(s::IO, nrOfBytes::Integer, types) 
+  type_kind, val_type, key_type = types;
   nrOfBytes < 0     ? nothing :
   type_kind == 0x02 ? ntoh(read(s, Uint64)) : 
   type_kind == 0x09 ? int(ntoh(read(s, Uint32))) :
@@ -125,18 +129,18 @@ function decodeValue(s::IO, nrOfBytes::Integer,
   type_kind == 0x0D ? bytestring(readbytes(s, nrOfBytes)) :
   type_kind == 0x20 ? decodeList(s, val_type) :
   type_kind == 0x21 ? decodeDict(s, key_type, val_type) :
-  type_kind == 0x22 ? Set(decodeList(s, val_type)) :
+  type_kind == 0x22 ? decodeMap(s, val_type) :
             ("*NYI*", type_kind, readbytes(s, nrOfBytes))
 end
 
-function decodeResultRows(s::IOBuffer)
-  flags = ntoh(read(s, Uint32)); 
-  colcnt = ntoh(read(s, Uint32)); 
-  global_tables_spec = (flags & 0x0001) != 0;
+function decodeResultRowTypes(s::IOBuffer)
+  flags   = ntoh(read(s, Uint32)); 
+  colcnt  = ntoh(read(s, Uint32)); 
+  gl_spec = (flags & 0x0001) != 0;
   
-  if global_tables_spec then
-    global_ksname = decodeString(s);
-    global_tablename = decodeString(s);
+  if gl_spec then
+    gl_ksname = decodeString(s);
+    gl_tablename = decodeString(s);
   end
   if (flags & 0x0002) != 0 then
     println("d >> ");
@@ -144,43 +148,34 @@ function decodeResultRows(s::IOBuffer)
   if (flags & 0x0004) != 0 then
     println("e >> ");
   end
-  col_type = Array(Uint16, colcnt);
-  col_sub_type = Array(Uint16, colcnt);
-  col_key_type = Array(Uint16, colcnt);
+  types = Array((Int16,Any,Any), colcnt);
   for col in 1:colcnt
-    if global_tables_spec then
-      ksname = global_ksname;
-      tablename = global_tablename;
-    else
-      ksname = decodeString(s);
-      tablename = decodeString(s);
-    end
-    name = decodeString(s);
-    type_kind = ntoh(read(s, Uint16)); 
-    col_type[col] = type_kind;
-    if type_kind == 0x20 || type_kind == 0x22 then
-      option_id = ntoh(read(s, Uint16)); 
-      col_sub_type[col] = option_id;
-    elseif type_kind == 0x21 then
-      key_type = ntoh(read(s, Uint16)); 
-      value_type = ntoh(read(s, Uint16)); 
-      col_key_type[col] = key_type;
-      col_sub_type[col] = value_type;
-    end
-    #println(col, " :: $ksname.$tablename.$name : $type_kind")
+    ksname     = gl_spec ? gl_ksname : decodeString(s);
+    tablename  = gl_spec ? gl_tablename : decodeString(s);
+    name       = decodeString(s);
+    kind       = ntoh(read(s, Uint16)); 
+    key_type   = kind == 0x21 ?
+                   ntoh(read(s, Uint16)) : nothing;
+    sub_type   = kind in {0x20, 0x21, 0x22} ?
+                   ntoh(read(s, Uint16)) : nothing; 
+    types[col] = (kind, sub_type, key_type);
   end
+  types
+end
 
-  row_count = ntoh(read(s, Uint32)); 
-  values = Array(Any, row_count);
-  for row in 1:row_count
-    values[row] = row_value = Array(Any, colcnt);
-    for col in 1:colcnt
-      nrOfBytes = ntoh(read(s, Int32)); 
-      row_value[col] = decodeValue(s, nrOfBytes, col_type[col], 
-                          col_sub_type[col], col_key_type[col]);
-    end
+function decodeResultColumn(s::IO, typ) 
+  nrOfBytes = ntoh(read(s, Int32));
+  decodeValue(s, nrOfBytes, typ)
+end
+
+function decodeResultRows(s::IOBuffer)
+  types = decodeResultRowTypes(s);
+  nrOfRows = ntoh(read(s, Uint32));
+  ar = Array(Any, nrOfRows)
+  for row = 1:nrOfRows
+    ar[row] = map(typ -> decodeResultColumn(s, typ), types)
   end
-  values
+  ar
 end
 
 function decodeResultMessage(buffer::Array{Uint8})

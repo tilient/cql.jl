@@ -92,22 +92,30 @@ type UUID
   val::Uint128
 end
 
+function UUID(str::String)
+  UUID(parseint(Uint128, replace(str, '-', ""), 16))
+end
+
 function Base.print(io::IO, uuid::UUID)                          
   h = hex(uuid.val,32);
-  print(io, "\"");
-  print(io, h[1:7]);
+  print(io, "uuid\"");
+  print(io, h[1:8]);
   print(io, "-");
-  print(io, h[8:11]);
+  print(io, h[9:12]);
   print(io, "-");
-  print(io, h[12:15]);
+  print(io, h[13:16]);
   print(io, "-");
-  print(io, h[16:19]);
+  print(io, h[17:20]);
   print(io, "-");
-  print(io, h[20:32]);
+  print(io, h[21:32]);
   print(io, "\"");
 end
 
 Base.show (io::IO, uuid::UUID) = print(io, uuid);
+
+macro uuid_str(p)
+  UUID(p)
+end
 
 ##################################################################
 ### Timestamp ####################################################
@@ -117,13 +125,21 @@ type Timestamp
   milliseconds::Uint64
 end
 
+function Timestamp(str::String)
+  Timestamp(1000 * uint64(time(strptime("%F %T %Z %z", str))))
+end
+
 function Base.print(io::IO, t::Timestamp)
-  print(io, "\"");
-  print(io, strftime(t.milliseconds / 1000));
+  print(io, "ts\"");
+  print(io, strftime("%F %T %Z %z", div(t.milliseconds,1000)));
   print(io, "\"");
 end
 
 Base.show (io::IO, t::Timestamp) = print(io, t);
+
+macro ts_str(p)
+  Timestamp(p)
+end
 
 ##################################################################
 ### Decoding #####################################################

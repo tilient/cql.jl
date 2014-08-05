@@ -85,6 +85,47 @@ function handleServerMessages(con::CQLConnection)
 end
 
 ##################################################################
+### UUID #########################################################
+##################################################################
+
+type UUID
+  val::Uint128
+end
+
+function Base.print(io::IO, uuid::UUID)                          
+  h = hex(uuid.val,32);
+  print(io, "\"");
+  print(io, h[1:7]);
+  print(io, "-");
+  print(io, h[8:11]);
+  print(io, "-");
+  print(io, h[12:15]);
+  print(io, "-");
+  print(io, h[16:19]);
+  print(io, "-");
+  print(io, h[20:32]);
+  print(io, "\"");
+end
+
+Base.show (io::IO, uuid::UUID) = print(io, uuid);
+
+##################################################################
+### Timestamp ####################################################
+##################################################################
+
+type Timestamp 
+  milliseconds::Uint64
+end
+
+function Base.print(io::IO, t::Timestamp)
+  print(io, "\"");
+  print(io, strftime(t.milliseconds / 1000));
+  print(io, "\"");
+end
+
+Base.show (io::IO, t::Timestamp) = print(io, t);
+
+##################################################################
 ### Decoding #####################################################
 ##################################################################
 
@@ -127,8 +168,8 @@ function decodeValue(s::IO, nrOfBytes::Integer, types)
   nrOfBytes < 0     ? nothing :
   type_kind == 0x02 ? ntoh(read(s, Uint64)) : 
   type_kind == 0x09 ? int(ntoh(read(s, Uint32))) :
-  type_kind == 0x0B ? ("Timestamp", ntoh(read(s, Uint64))) :
-  type_kind == 0x0C ? ("UUID", ntoh(read(s, Uint128))) :
+  type_kind == 0x0B ? (Timestamp(ntoh(read(s, Uint64)))) :
+  type_kind == 0x0C ? (UUID(ntoh(read(s, Uint128)))) :
   type_kind == 0x0D ? bytestring(readbytes(s, nrOfBytes)) :
   type_kind == 0x20 ? decodeList(s, val_type) :
   type_kind == 0x21 ? decodeDict(s, key_type, val_type) :

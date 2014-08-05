@@ -1,6 +1,7 @@
 using cql;
 
 server = "tilient.net";
+#server = "ca01.tilient.net";
 
 function test01()
   ## 'Example of a music service' from 
@@ -194,7 +195,7 @@ function test03()
     "create table person (id int , od int, name varchar, 
                           PRIMARY KEY (id, od));");
 
-  N = 10;
+  N = 100000;
   
   @time begin
     for i in 1:N
@@ -205,12 +206,9 @@ function test03()
     cql.sync(c);
   end
 
-  @time begin
-    cql.query(c, 
+  @time cql.query(c, 
       "select id, od from person where id = 1 
          order by od asc limit $N;");
-    nothing
-  end
 
   cql.command(c, "DROP TABLE person;");
   cql.command(c, "DROP KEYSPACE demo;");

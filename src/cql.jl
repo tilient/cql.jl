@@ -60,7 +60,10 @@ function handleServerMessage(con::CQLConnection)
     put!(pop!(con.replies, id), 
          (opcode, readbytes(con.socket, len)));
   elseif opcode == 0x00 then
-    println("ERROR: ", bytestring(readbytes(con.socket, len)));
+    kind   = ntoh(read(con.socket, Int32));
+    strlen = ntoh(read(con.socket, Int16));
+    println("ERROR [$kind] : ", 
+            bytestring(readbytes(con.socket, strlen)));
   else
     for _ in 1:len
       read(con.socket, Uint8);
@@ -190,11 +193,17 @@ function decodeResultMessage(buffer::Array{Uint8})
        {"???"}
 end
 
+function decodeErrorMessage(buffer::Array{Uint8})
+  s = IOBuffer(buffer);
+  kind = ntoh(read(s, Uint32)); 
+  errmsg = decodeString(s);
+  println("ERROR [$kind]: ", errmsg);
+  {"ERROR", kind, errmsg} 
+end
+
 function decodeMessage(opcode::Uint8, buffer::Array{Uint8})
   opcode == 0x08 ? decodeResultMessage(buffer) :
-  opcode == 0x00 ? ( errmsg = bytestring(buffer);
-                     println("ERROR: ", errmsg);
-                     {"ERROR", errmsg} ) :
+  opcode == 0x00 ? decodeErrorMessage(buffer) :
          {opcode, buffer};
 end
 

@@ -122,16 +122,21 @@ end
 ##################################################################
 
 type Timestamp 
-  milliseconds::Uint64
+  milliseconds::Int64
 end
 
+const timeOffset = time(strptime("%F %T %z %Z", 
+                               "1970-01-01 00:00:00 +0000 UTC"));
+
 function Timestamp(str::String)
-  Timestamp(1000 * uint64(time(strptime("%F %T %Z %z", str))))
+  Timestamp(1000 * int64(time(strptime("%F %T", str)) 
+                         + timeOffset))
 end
 
 function Base.print(io::IO, t::Timestamp)
   print(io, "ts\"");
-  print(io, strftime("%F %T %Z %z", div(t.milliseconds,1000)));
+  print(io, strftime("%F %T", div(t.milliseconds, 1000) 
+                              - timeOffset));
   print(io, "\"");
 end
 

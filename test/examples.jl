@@ -1,11 +1,10 @@
 using cql;
 
 server = "tilient.net";
-#server = "ca01.tilient.net";
 
 function test01()
-  ## 'Example of a music service' from 
-  ## the manual 'About CQL for Cassandra 2.0'
+  ## 'Example of a music service' from the manual 
+  ## 'About CQL for Cassandra 2.0'
 
   c = cql.connect(server);
 
@@ -216,4 +215,4 @@ function test03()
   nothing
 end
 
-##################################################################
+####################################################################

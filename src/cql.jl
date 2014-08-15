@@ -1,8 +1,8 @@
 module cql
 
-##################################################################
+####################################################################
 # CQLConnection
-##################################################################
+####################################################################
 
 type CQLConnection
   socket  :: Base.TcpSocket
@@ -12,9 +12,9 @@ type CQLConnection
   pending :: Int
 end
 
-##################################################################
+####################################################################
 # Connect & Disconnect
-##################################################################
+####################################################################
 
 function connect(server::String = "localhost", port::Int = 9042)
   con = CQLConnection(Base.connect(server, port),
@@ -41,9 +41,9 @@ function disconnect(con::CQLConnection)
   con 
 end
 
-##################################################################
+####################################################################
 # Handle Server Messages
-##################################################################
+####################################################################
 
 function readServerMessage(socket::Base.TcpSocket)
   version = read(socket, Uint8);
@@ -84,9 +84,9 @@ function handleServerMessages(con::CQLConnection)
   nothing
 end
 
-##################################################################
-### UUID #########################################################
-##################################################################
+####################################################################
+# UUID
+####################################################################
 
 type UUID
   val::Uint128
@@ -109,6 +109,7 @@ function Base.print(io::IO, uuid::UUID)
   print(io, "-");
   print(io, h[21:32]);
   print(io, "\"");
+  nothing
 end
 
 Base.show (io::IO, uuid::UUID) = print(io, uuid);
@@ -117,20 +118,19 @@ macro uuid_str(p)
   UUID(p)
 end
 
-##################################################################
-### Timestamp ####################################################
-##################################################################
+####################################################################
+# Timestamp
+####################################################################
 
 type Timestamp 
   milliseconds::Int64
 end
 
 const timeOffset = time(strptime("%F %T %z %Z", 
-                               "1970-01-01 00:00:00 +0000 UTC"));
+                                 "1970-01-01 00:00:00 +0000 UTC"));
 
 function Timestamp(str::String)
-  Timestamp(1000 * int64(time(strptime("%F %T", str)) 
-                         + timeOffset))
+  Timestamp(1000 * int64(time(strptime("%F %T", str)) + timeOffset))
 end
 
 function Base.print(io::IO, t::Timestamp)
@@ -138,6 +138,7 @@ function Base.print(io::IO, t::Timestamp)
   print(io, strftime("%F %T", div(t.milliseconds, 1000) 
                               - timeOffset));
   print(io, "\"");
+  nothing
 end
 
 Base.show (io::IO, t::Timestamp) = print(io, t);
@@ -146,9 +147,9 @@ macro ts_str(p)
   Timestamp(p)
 end
 
-##################################################################
-### Decoding #####################################################
-##################################################################
+####################################################################
+# Decoding
+####################################################################
 
 function decodeString(s::IO)
   strlen = ntoh(read(s, Int16));
@@ -219,10 +220,9 @@ function decodeResultRowTypes(s::IOBuffer)
     tablename  = gl_spec ? gl_tablename : decodeString(s);
     name       = decodeString(s);
     kind       = ntoh(read(s, Uint16)); 
-    key_type   = kind == 0x21 ?
-                   ntoh(read(s, Uint16)) : nothing;
-    sub_type   = kind in {0x20, 0x21, 0x22} ?
-                   ntoh(read(s, Uint16)) : nothing; 
+    key_type   = kind == 0x21 ?  ntoh(read(s, Uint16)) : nothing;
+    sub_type   = kind in {0x20, 0x21, 0x22} ? ntoh(read(s, Uint16))
+                                            : nothing; 
     types[col] = (kind, sub_type, key_type);
   end
   types
@@ -235,12 +235,16 @@ end
 
 function decodeResultRows(s::IOBuffer)
   types = decodeResultRowTypes(s);
+  nrOfColumns = length(types);
   nrOfRows = ntoh(read(s, Uint32));
-  ar = Array(Any, nrOfRows)
-  for row = 1:nrOfRows
-    ar[row] = map(typ -> decodeResultColumn(s, typ), types)
+  rows = Array(Array{Any}, nrOfRows)
+  for rix = 1:nrOfRows
+    rows[rix] = Array(Any, nrOfColumns);
+    for cix in 1:nrOfColumns
+      row[rix][cix] = decodeResultColumn(s, types[cix])
+    end
   end
-  ar
+  rows
 end
 
 function decodeResultMessage(buffer::Array{Uint8})
@@ -269,9 +273,9 @@ function decodeMessage(opcode::Uint8, buffer::Array{Uint8})
          {opcode, buffer};
 end
 
-##################################################################
-### Encoding #####################################################
-##################################################################
+####################################################################
+# Encoding
+####################################################################
 
 function cql_encode_string(buf::IOBuffer, str::String)
   encStr = bytestring(is_valid_utf8(str) ? str : utf8(str));
@@ -286,10 +290,6 @@ function cql_encode_long_string(buf::IOBuffer, str::String)
   write(buf, encStr);
   nothing
 end
-
-##################################################################
-# Encoding
-##################################################################
 
 function cql_encode(buf::IOBuffer, dict::Dict)
   write(buf, hton(uint16(length(dict))));
@@ -308,9 +308,9 @@ function cql_encode(buf::IOBuffer, query::String)
   nothing
 end
 
-##################################################################
+####################################################################
 # Sending Message to the server
-##################################################################
+####################################################################
 
 function sendMessageBody(con::CQLConnection, msg)
   buf = con.buffer;
@@ -320,8 +320,8 @@ function sendMessageBody(con::CQLConnection, msg)
   write(con.socket, takebuf_array(buf));
 end
 
-function sendMessage(con::CQLConnection, kind::Uint8,
-                     msg, id :: Uint8 = 0x00)
+function sendMessage(con::CQLConnection, kind::Uint8, msg, 
+                     id::Uint8 = 0x00)
   con.pending += 1;
   write(con.socket, 0x02);
   write(con.socket, 0x00);
@@ -335,7 +335,7 @@ function sendMessage(con::CQLConnection, kind::Uint8,
 end
 
 function nextReplyID(con::CQLConnection)
-  id :: Uint8 = con.msg_id;
+  id::Uint8 = con.msg_id;
   con.msg_id = 1 + (id + 1) % 99;
   while haskey(con.replies, id)
     yield();
@@ -345,9 +345,9 @@ function nextReplyID(con::CQLConnection)
   (id, reply)
 end
 
-##################################################################
+####################################################################
 # Queries
-##################################################################
+####################################################################
  
 function query(con::CQLConnection, msg::String)
   sync(con);
@@ -382,7 +382,7 @@ function sync(con::CQLConnection)
   end
 end
 
-##################################################################
+####################################################################
 
 end
 
